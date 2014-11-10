@@ -1,15 +1,15 @@
 #define MLX90614_ADDR   0xB4
 
-#define DISP_DATA       PORTB
-#define DISP_DATA_DDR   DDRB
+#define DISP_DATA       PORTD
+#define DISP_DATA_DDR   DDRD
 
 #define MAX_SEGMENT     4     
-#define DISP_SEG        PORTD
-#define DISP_SEG_DDR    DDRD
-#define DISP_SEG_1      4
-#define DISP_SEG_2      5
-#define DISP_SEG_3      6
-#define DISP_SEG_4      7
+#define DISP_SEG        PORTB
+#define DISP_SEG_DDR    DDRB
+#define DISP_SEG_1      0
+#define DISP_SEG_2      1
+#define DISP_SEG_3      2
+#define DISP_SEG_4      3
 
 
 #define TEN_CTRL        PORTC

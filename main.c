@@ -30,7 +30,7 @@ Data Stack size         : 32
 #asm
    .equ __i2c_port=0x15 ;PORTC
    .equ __sda_bit=4
-   .equ __scl_bit=5
+   .equ __scl_bit=3
 #endasm
 #include <i2c.h>
                             //  0    1    2    3    4    5    6    7    8    9
@@ -40,9 +40,9 @@ const unsigned char symbC = 0x39; //
 const unsigned char codeErr[3] = {0x79, 0x50, 0x50};//Err 
 volatile unsigned char segment = 0; //отображаемый сешмент
   
-volatile int start_temp = 0.0;
-volatile int curent_temp = 0.0;
-volatile int set_temp = 55.0; // 55 градусов
+volatile int start_temp = 0;
+volatile int curent_temp = 0;
+volatile int set_temp = 55; // 55 градусов
      
 volatile unsigned int  start_second = 0;
 volatile unsigned int  work_second = 0;
@@ -52,7 +52,7 @@ volatile unsigned int  WORK_STATUS = 0;
 
 void config_chip();
 void disp_segment_code(unsigned char code, int segment);
-void display_temp(unsigned char temp);
+void display_temp(int temp);
 void display_work_time(unsigned int second);
 unsigned char get_temp_f(float* temp_val, unsigned int addr);
 unsigned char get_temp(int* temp_val, unsigned int addr);
@@ -121,7 +121,7 @@ void config_chip()
     MCUCR=0x00;
 
     // Timer(s)/Counter(s) Interrupt(s) initialization
-    TIMSK=0x00;
+    TIMSK=0x11;
 
     // Analog Comparator initialization
     // Analog Comparator: Off
@@ -130,16 +130,18 @@ void config_chip()
     SFIOR=0x00;   
     
     
-    // 2 Wire Bus initialization
-    // Generate Acknowledge Pulse: Off
-    // 2 Wire Bus Slave Address: 0h
-    // General Call Recognition: Off
-    // Bit Rate: 400,000 kHz
-//    TWSR=0x00;
-//    TWBR=0x02;
-//    TWAR=0x00;
-//    TWCR=0x04;
-    
+    // ADC initialization
+    // ADC disabled
+    ADCSRA=0x00;
+
+    // SPI initialization
+    // SPI disabled
+    SPCR=0x00;
+
+    // TWI initialization
+    // TWI disabled
+    TWCR=0x00;
+        
     // Global enable interrupts
     #asm("sei")
 }
@@ -147,38 +149,43 @@ void config_chip()
 
 // Отображение температуры, дисплей с Общим Катодом
 // для инверсии кода цифры нужно отнять 255
-void display_temp(unsigned char temp)
+void display_temp(int temp)
 {    
     unsigned char Dig[2]={0};
-  
+      
+    while (temp >= 100) {
+        temp -= 100;  
+//        Dig[2]++; 
+    }
+    
     while (temp >= 10) {
         temp -= 10;  
         Dig[1]++; 
     } 
     
     Dig[0] = temp;     
-      
-   
-          
+                
     segment++; 
     if (segment==MAX_SEGMENT) 
         segment = 0; 
         
-    switch (segment) {
-        case 0: 
-            disp_segment_code(symbC, segment);   //цельсия
+    switch (segment) {           
+        case 0:
+            //TODO: знак температуры 
+            disp_segment_code(0xFF, segment);
         break;
-        
-        case 1:
-            disp_segment_code(symbGrad, segment);   //знак градуса
-        break;
-        
+            
+        case 1: 
         case 2:
-        case 3:
-            disp_segment_code( codes[ Dig[segment-2] ], segment);                     
-        break;
+            disp_segment_code( codes[ Dig[sizeof(Dig)-segment] ], segment);                     
+        break;   
         
-        default:
+        case 3: 
+            disp_segment_code(symbC, segment);   //цельсия
+        break;    
+        
+        default: 
+            disp_segment_code(0xFF, segment);
         break;
     }              
 }
@@ -206,30 +213,67 @@ void display_work_time(unsigned int second)
         segment = 0; 
         
     switch (segment) {
-        case 0:   
         case 1:   
-        case 2:
-            disp_segment_code(codes[Dig[segment]], segment);   //цельсия
+        case 2:   
+        case 3:
+            disp_segment_code(codes[Dig[sizeof(Dig)-segment]], segment);   //цельсия
         break;
             
-        default:
+        default:  
+            disp_segment_code(0x00, segment);
         break;
     }   
 }
 
 
-void disp_segment_code(unsigned char code, int segment)
-{                          
-    if (segment == 0)  
-        clearBit(DISP_SEG, DISP_SEG_1);
-    else if (segment == 1)
-        clearBit(DISP_SEG, DISP_SEG_2);
-    else if (segment == 2)           
-        clearBit(DISP_SEG, DISP_SEG_3);
-    else if (segment == 3)           
-        clearBit(DISP_SEG, DISP_SEG_4);
+void display_err(unsigned int code)
+{                        
+    segment++; 
+    if (segment==MAX_SEGMENT) 
+        segment = 0; 
         
-    DISP_DATA = code;
+    switch (segment) {
+        case 0:              
+        case 1:
+        case 2:           
+            disp_segment_code(codeErr[segment], segment);
+        break;
+        
+        case 3:
+            disp_segment_code(code, segment);   
+        break;
+            
+        default:  
+            disp_segment_code(0x00, segment);
+        break;
+    }   
+}
+
+
+// конфигурация портов индикатора
+void disp_config(unsigned char reverse)
+{
+    if (reverse) {
+        DISP_SEG_DDR |= ((1<<DISP_SEG_1)|(1<<DISP_SEG_2)|(1<<DISP_SEG_3)|(1<<DISP_SEG_4));
+        DISP_SEG &= ~((1<<DISP_SEG_1)|(1<<DISP_SEG_2)|(1<<DISP_SEG_3)|(1<<DISP_SEG_4));
+    
+        DISP_DATA_DDR = 0xFF;
+        DISP_DATA = 0x00;
+    }else {               
+        DISP_SEG_DDR &= ~((1<<DISP_SEG_1)|(1<<DISP_SEG_2)|(1<<DISP_SEG_3)|(1<<DISP_SEG_4)); 
+        DISP_SEG |= (1<<DISP_SEG_1)|(1<<DISP_SEG_2)|(1<<DISP_SEG_3)|(1<<DISP_SEG_4);
+    
+        DISP_DATA_DDR = 0x00;
+        DISP_DATA = 0x00;
+    }
+}
+
+// зажечь сегмент
+void disp_segment_code(unsigned char code, int segment)
+{        
+    DISP_SEG &= ~((1<<DISP_SEG_1)|(1<<DISP_SEG_2)|(1<<DISP_SEG_3)|(1<<DISP_SEG_4));       
+        
+    DISP_DATA = 0xFF - code;
                    
     if (segment == 0)  
         setBit(DISP_SEG, DISP_SEG_1);
@@ -282,7 +326,7 @@ unsigned char get_temp(int* temp_val, unsigned int addr)
     float temp = 0;
     unsigned char ret;   
     
-    temp_val = 0;
+    *temp_val = 0;
     ret = get_temp_f(&temp, addr);
     if (!ret) 
         return 0; 
@@ -294,21 +338,27 @@ unsigned char get_temp(int* temp_val, unsigned int addr)
 
 
 interrupt [TIM0_OVF] void timer0_ovf_isr(void)
-{
+{   
     if (show_time >= 5) {
         if ( ifBitSet(WORK_STATUS, FLAG_START) )
             display_work_time(start_second);
         else           
             display_work_time(work_second);          
-    }else {
-        display_temp(curent_temp);
+    }else {      
+        if (ifBitSet(WORK_STATUS, FLAG_ERR))
+            display_err(0);
+        else 
+            display_temp(curent_temp);
     }  
 }
 
-
+// resolution 1sec
 // Timer 0 overflow interrupt service routine
 interrupt [TIM1_COMPA] void timer1_ovf_isr(void)
 {   
+    if (ifBitSet(DDRC, 5)) clearBit(DDRC, 5);   
+    else setBit(DDRC, 5);
+      
     show_time++;
     if (show_time > 7)
         show_time = 0;
@@ -322,12 +372,13 @@ interrupt [TIM1_COMPA] void timer1_ovf_isr(void)
 }
 
 
-
 void main(void)
 {
     unsigned char req;
     int temp;
-    config_chip(); 
+    config_chip();
+    disp_config(1);
+         
     // I2C Bus initialization    
     i2c_init();                  
     delay_ms(2000);
@@ -335,14 +386,18 @@ void main(void)
     // MLX90614 чтение температуры         
     req = get_temp(&start_temp, MLX90614_ADDR); 
     setBit(WORK_STATUS, FLAG_START);
+                  
     
     while (1)
     {
         // MLX90614 чтение температуры         
         req = get_temp(&curent_temp, MLX90614_ADDR);
-        if (!req) {           
-            curent_temp = 0;
-            delay_ms(1000);
+        if (!req) {   
+            setBit(WORK_STATUS, FLAG_ERR);        
+            delay_ms(1000); 
+            continue;
+        }else {
+            clearBit(WORK_STATUS, FLAG_ERR);
         }                        
         
         if ( !ifBitSet(WORK_STATUS, FLAG_END) ) {
@@ -399,5 +454,5 @@ void main(void)
         }     
         
         delay_ms(3000);      
-    };
+    };         
 }
